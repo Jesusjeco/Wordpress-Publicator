@@ -7,6 +7,128 @@ import requests
 import base64
 import re
 from typing import List, Tuple, Optional
+from bs4 import BeautifulSoup
+
+
+class ContentSanitizer:
+    """Sanitizes HTML content by removing styles, classes, and data attributes"""
+    
+    def __init__(self):
+        # Attributes to remove from all HTML elements
+        self.attributes_to_remove = [
+            'style', 'class', 'id', 'data-*', 'onclick', 'onload', 'onerror',
+            'onmouseover', 'onmouseout', 'onfocus', 'onblur', 'onchange',
+            'onsubmit', 'onreset', 'onselect', 'onkeydown', 'onkeypress',
+            'onkeyup', 'width', 'height', 'align', 'valign', 'bgcolor',
+            'background', 'border', 'cellpadding', 'cellspacing', 'face',
+            'size', 'color'
+        ]
+        
+        # Allowed HTML tags for WordPress content
+        self.allowed_tags = [
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'p', 'br', 'hr',
+            'strong', 'b', 'em', 'i', 'u', 'strike', 'del',
+            'blockquote', 'cite', 'q',
+            'ul', 'ol', 'li',
+            'a', 'img',
+            'table', 'thead', 'tbody', 'tr', 'th', 'td',
+            'div', 'span',
+            'code', 'pre'
+        ]
+        
+        # Attributes to keep for specific tags
+        self.allowed_attributes = {
+            'a': ['href', 'title', 'target'],
+            'img': ['src', 'alt', 'title'],
+            'blockquote': ['cite'],
+            'q': ['cite']
+        }
+    
+    def sanitize_content(self, html_content: str) -> str:
+        """
+        Sanitize HTML content by removing unwanted attributes and tags
+        
+        Args:
+            html_content (str): Raw HTML content
+            
+        Returns:
+            str: Sanitized HTML content
+        """
+        if not html_content or not html_content.strip():
+            return html_content
+        
+        try:
+            # Parse HTML with BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Remove unwanted tags completely
+            self._remove_unwanted_tags(soup)
+            
+            # Clean attributes from all remaining tags
+            self._clean_attributes(soup)
+            
+            # Return cleaned HTML
+            return str(soup)
+            
+        except Exception as e:
+            print(f"Content sanitization error: {str(e)}")
+            # Return original content if sanitization fails
+            return html_content
+    
+    def _remove_unwanted_tags(self, soup: BeautifulSoup) -> None:
+        """Remove tags that are not in the allowed list"""
+        for tag in soup.find_all():
+            if tag.name not in self.allowed_tags:
+                # Replace tag with its content
+                tag.unwrap()
+    
+    def _clean_attributes(self, soup: BeautifulSoup) -> None:
+        """Remove unwanted attributes from all tags"""
+        for tag in soup.find_all():
+            if not tag.name:
+                continue
+                
+            # Get allowed attributes for this tag
+            allowed_attrs = self.allowed_attributes.get(tag.name, [])
+            
+            # Get all current attributes
+            current_attrs = list(tag.attrs.keys())
+            
+            # Remove unwanted attributes
+            for attr in current_attrs:
+                should_remove = False
+                
+                # Check if attribute should be removed
+                if attr not in allowed_attrs:
+                    should_remove = True
+                
+                # Special handling for data-* attributes
+                if attr.startswith('data-'):
+                    should_remove = True
+                
+                # Remove the attribute
+                if should_remove:
+                    del tag[attr]
+    
+    def clean_text_content(self, content: str) -> str:
+        """
+        Clean content that might be mixed HTML and text
+        
+        Args:
+            content (str): Content to clean
+            
+        Returns:
+            str: Cleaned content
+        """
+        # First, sanitize any HTML
+        sanitized = self.sanitize_content(content)
+        
+        # Remove extra whitespace and normalize line breaks
+        sanitized = re.sub(r'\n\s*\n\s*\n+', '\n\n', sanitized)
+        sanitized = re.sub(r'[ \t]+', ' ', sanitized)
+        
+        return sanitized.strip()
 
 
 class ShutterstockAPI:
@@ -245,6 +367,7 @@ class ImageProcessor:
     
     def __init__(self, image_api):
         self.image_api = image_api
+        self.content_sanitizer = ContentSanitizer()
     
     def extract_keywords_from_content(self, content: str, max_keywords: int = 3) -> List[str]:
         """Extract relevant keywords from content for image search"""
@@ -321,16 +444,21 @@ class ImageProcessor:
         if not content.strip():
             return content, []
         
-        # Extract keywords for image search
-        keywords = self.extract_keywords_from_content(content)
+        # First, sanitize the input content to remove unwanted attributes
+        print("Sanitizing input content...")
+        sanitized_content = self.content_sanitizer.sanitize_content(content)
+        
+        # Extract keywords for image search from sanitized content
+        keywords = self.extract_keywords_from_content(sanitized_content)
         if not keywords:
             keywords = ['business', 'technology', 'professional']  # Fallback keywords
         
         # Split content into sections respecting paragraph boundaries
-        sections = self.split_content_by_words(content, words_per_image)
+        sections = self.split_content_by_words(sanitized_content, words_per_image)
         
         if len(sections) <= 1:
-            return content, []  # Not enough content to add images
+            # Still sanitize even if no images are added
+            return self.content_sanitizer.clean_text_content(sanitized_content), []
         
         modified_content = ""
         used_images = []
@@ -353,19 +481,38 @@ class ImageProcessor:
                     image_url = self.image_api.get_image_download_url(image['id'])
                     
                     if image_url:
-                        # Insert image HTML with proper paragraph structure
+                        # Insert image HTML with proper paragraph structure (no inline styles)
                         alt_text = image.get('description', keyword)
                         
                         # Ensure proper spacing and paragraph structure
                         if not modified_content.endswith('\n'):
                             modified_content += '\n'
                         
-                        # Add image as a proper paragraph
-                        image_html = f'\n<p><img decoding="async" src="{image_url}" alt="{alt_text}" style="width: 100%; max-width: 600px; height: auto; margin: 20px 0;"></p>\n'
+                        # Add image as a proper paragraph without inline styles
+                        image_html = f'\n<p><img src="{image_url}" alt="{alt_text}"></p>\n'
                         modified_content += image_html
                         used_images.append(image_url)
-                
-        return modified_content, used_images
+        
+        # Final sanitization to ensure clean output
+        final_content = self.content_sanitizer.clean_text_content(modified_content)
+        
+        return final_content, used_images
+    
+    def sanitize_content_only(self, content: str) -> str:
+        """
+        Sanitize content without adding images
+        
+        Args:
+            content (str): HTML content to sanitize
+            
+        Returns:
+            str: Sanitized HTML content
+        """
+        if not content.strip():
+            return content
+            
+        print("Sanitizing content (no images)...")
+        return self.content_sanitizer.clean_text_content(content)
 
 
 class PlaceholderImageAPI:

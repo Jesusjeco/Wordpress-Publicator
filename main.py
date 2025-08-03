@@ -328,10 +328,11 @@ class WordPressPublicator:
     def _create_post_thread(self, title, content, status, permalink=None):
         """Hilo para crear el post"""
         try:
-            # Process images if enabled
+            # Always sanitize content for WordPress compatibility
             processed_content = content
+            
             if self.enable_images_var.get():
-                self.root.after(0, lambda: self.status_var.set("Processing images..."))
+                self.root.after(0, lambda: self.status_var.set("Processing images and sanitizing content..."))
                 
                 # Create image processor based on selected source
                 try:
@@ -351,12 +352,30 @@ class WordPressPublicator:
                     if used_images:
                         self.root.after(0, lambda: self.status_var.set(f"Added {len(used_images)} images. Creating post..."))
                     else:
-                        self.root.after(0, lambda: self.status_var.set("No images added. Creating post..."))
+                        self.root.after(0, lambda: self.status_var.set("Content sanitized. Creating post..."))
                         
                 except Exception as img_error:
                     print(f"Image processing error: {str(img_error)}")
-                    self.root.after(0, lambda: self.status_var.set("Image processing failed. Creating post without images..."))
-                    # Continue with original content if image processing fails
+                    self.root.after(0, lambda: self.status_var.set("Image processing failed. Sanitizing content..."))
+                    # Fallback to content-only sanitization if image processing fails
+                    try:
+                        from image_api import ImageProcessor
+                        image_processor = ImageProcessor()
+                        processed_content = image_processor.sanitize_content_only(content)
+                    except Exception as sanitize_error:
+                        print(f"Content sanitization error: {str(sanitize_error)}")
+                        processed_content = content
+            else:
+                # Images disabled - only sanitize content
+                self.root.after(0, lambda: self.status_var.set("Sanitizing content..."))
+                try:
+                    from image_api import ImageProcessor
+                    image_processor = ImageProcessor()
+                    processed_content = image_processor.sanitize_content_only(content)
+                    self.root.after(0, lambda: self.status_var.set("Content sanitized. Creating post..."))
+                except Exception as sanitize_error:
+                    print(f"Content sanitization error: {str(sanitize_error)}")
+                    self.root.after(0, lambda: self.status_var.set("Sanitization failed. Creating post with original content..."))
                     processed_content = content
             
             # Create the post with processed content

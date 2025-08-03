@@ -9,7 +9,8 @@ A Python desktop application for publishing posts to WordPress with automatic im
 - **Credential Validation**: Test connection before publishing
 - **Post Management**: Create posts, save drafts, and publish content
 - **Automatic Permalink Generation**: SEO-friendly permalinks from post titles
-- **Image Integration**: Automatically add relevant images from Shutterstock
+- **Image Integration**: Automatically add relevant images from multiple sources
+- **Content Sanitization**: Automatically removes CSS rules, classes, and data attributes for WordPress compatibility
 - **Customizable Image Settings**: Control image frequency and sources
 - **Error Handling**: Comprehensive error management and user feedback
 
@@ -113,13 +114,22 @@ When the "Add images to post content" option is enabled:
 - **Shutterstock**: Stock photos (watermarked for free accounts)
 - **Placeholder**: Clean, professional placeholder images
 
-## Image Processing Features
+## Content Processing Features
 
+### Content Sanitization
+- **WordPress Compatibility**: Automatically removes CSS rules, classes, and data attributes
+- **Clean HTML Output**: Preserves essential HTML structure while removing styling conflicts
+- **Allowed Tags**: Maintains safe HTML tags (h1-h6, p, strong, em, ul, ol, li, a, img, br)
+- **Attribute Filtering**: Keeps only essential attributes (href, src, alt, title)
+- **Always Active**: Content sanitization runs on all posts, regardless of image settings
+
+### Image Processing Features
 - **Smart Keyword Extraction**: Analyzes content for relevant terms
 - **Automatic Image Placement**: Inserts images at optimal intervals
 - **Content-Aware Selection**: Chooses images matching article topics
+- **Paragraph-Aware Insertion**: Images are placed between paragraphs to maintain HTML structure
 - **Fallback Handling**: Continues without images if API fails
-- **Preview URLs**: Uses Shutterstock preview images for free accounts
+- **Preview URLs**: Uses appropriate image sources based on API availability
 
 ## Requirements
 
