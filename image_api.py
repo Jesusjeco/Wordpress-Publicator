@@ -6,7 +6,8 @@ Handles image fetching from various sources like Shutterstock, Unsplash, and pla
 import requests
 import base64
 import re
-from typing import List, Tuple, Optional
+import random
+from typing import List, Tuple, Optional, Set
 from bs4 import BeautifulSoup
 
 
@@ -203,7 +204,28 @@ class ShutterstockAPI:
             
             if response.status_code == 200:
                 data = response.json()
-                return data.get('data', [])
+                results = data.get('data', [])
+                
+                # Transform to consistent format with proper descriptions
+                formatted_results = []
+                for image in results:
+                    # Extract description from Shutterstock response
+                    description = (
+                        image.get('description', '') or 
+                        image.get('alt', '') or 
+                        ', '.join(image.get('keywords', [])[:3]) or  # Use first 3 keywords
+                        query
+                    )
+                    
+                    formatted_results.append({
+                        'id': image['id'],
+                        'description': description,
+                        'keywords': image.get('keywords', []),
+                        'assets': image.get('assets', {}),
+                        'original_data': image  # Keep original for reference
+                    })
+                
+                return formatted_results
             else:
                 print(f"Search failed: {response.status_code} - {response.text}")
                 return []
@@ -365,9 +387,18 @@ class UnsplashAPI:
 class ImageProcessor:
     """Processes content and integrates images"""
     
-    def __init__(self, image_api):
+    def __init__(self, image_api, wordpress_api=None):
+        """
+        Initialize ImageProcessor
+        
+        Args:
+            image_api: Instance of an image API (UnsplashAPI, ShutterstockAPI, or PlaceholderImageAPI)
+            wordpress_api: Optional WordPress API instance for uploading images to Media Library
+        """
         self.image_api = image_api
+        self.wordpress_api = wordpress_api
         self.content_sanitizer = ContentSanitizer()
+        self.used_image_ids: Set[str] = set()  # Track used image IDs to prevent duplicates
     
     def extract_keywords_from_content(self, content: str, max_keywords: int = 3) -> List[str]:
         """Extract relevant keywords from content for image search"""
@@ -403,6 +434,31 @@ class ImageProcessor:
         keywords = [word for word, freq in sorted_words[:max_keywords]]
         
         return keywords
+    
+    def select_unique_image(self, images: List[dict]) -> Optional[dict]:
+        """Select a random image that hasn't been used yet"""
+        if not images:
+            return None
+        
+        # Filter out already used images
+        available_images = [img for img in images if img['id'] not in self.used_image_ids]
+        
+        # If all images have been used, reset the tracking and use any image
+        if not available_images:
+            print("All images from this search have been used, resetting tracking...")
+            self.used_image_ids.clear()
+            available_images = images
+        
+        # Select a random image from available ones
+        selected_image = random.choice(available_images)
+        self.used_image_ids.add(selected_image['id'])
+        
+        return selected_image
+    
+    def reset_used_images(self):
+        """Reset the tracking of used images for a new post"""
+        self.used_image_ids.clear()
+        print("Reset used images tracking for new post")
     
     def split_content_by_words(self, content: str, words_per_section: int) -> List[str]:
         """Split content into sections based on word count, respecting paragraph boundaries"""
@@ -444,14 +500,21 @@ class ImageProcessor:
         if not content.strip():
             return content, []
         
+        # Reset used images tracking for this new post
+        self.reset_used_images()
+        
         # First, sanitize the input content to remove unwanted attributes
         print("Sanitizing input content...")
         sanitized_content = self.content_sanitizer.sanitize_content(content)
         
         # Extract keywords for image search from sanitized content
-        keywords = self.extract_keywords_from_content(sanitized_content)
+        keywords = self.extract_keywords_from_content(sanitized_content, max_keywords=6)  # Get more keywords
         if not keywords:
-            keywords = ['business', 'technology', 'professional']  # Fallback keywords
+            keywords = ['business', 'technology', 'professional', 'modern', 'creative', 'innovation']  # More fallback keywords
+        
+        # Shuffle keywords for randomness
+        random.shuffle(keywords)
+        print(f"Using keywords for images: {keywords}")
         
         # Split content into sections respecting paragraph boundaries
         sections = self.split_content_by_words(sanitized_content, words_per_image)
@@ -472,26 +535,49 @@ class ImageProcessor:
                 # Use different keywords for variety
                 keyword = keywords[i % len(keywords)]
                 
-                # Search for image
-                images = self.image_api.search_images(keyword, per_page=3)
+                # Search for more images to increase variety
+                images = self.image_api.search_images(keyword, per_page=10)
                 
                 if images:
-                    # Get the first available image
-                    image = images[0]
-                    image_url = self.image_api.get_image_download_url(image['id'])
+                    # Select a random, unique image
+                    image = self.select_unique_image(images)
                     
-                    if image_url:
-                        # Insert image HTML with proper paragraph structure (no inline styles)
-                        alt_text = image.get('description', keyword)
+                    if image:
+                        image_url = self.image_api.get_image_download_url(image['id'])
                         
-                        # Ensure proper spacing and paragraph structure
-                        if not modified_content.endswith('\n'):
-                            modified_content += '\n'
-                        
-                        # Add image as a proper paragraph without inline styles
-                        image_html = f'\n<p><img src="{image_url}" alt="{alt_text}"></p>\n'
-                        modified_content += image_html
-                        used_images.append(image_url)
+                        if image_url:
+                            alt_text = image.get('description', keyword)
+                            final_image_url = image_url
+                            
+                            # Try to upload to WordPress Media Library if available
+                            if self.wordpress_api:
+                                print(f"Uploading image to WordPress Media Library...")
+                                success, message, media_data = self.wordpress_api.upload_media(
+                                    image_url, 
+                                    alt_text=alt_text
+                                )
+                                
+                                if success and media_data:
+                                    # Use the WordPress media URL instead
+                                    final_image_url = media_data.get('source_url', image_url)
+                                    media_id = media_data.get('id', '')
+                                    print(f"✓ Image uploaded to Media Library (ID: {media_id})")
+                                else:
+                                    print(f"⚠ Media upload failed: {message}, using original URL")
+                            
+                            # Ensure proper spacing and paragraph structure
+                            if not modified_content.endswith('\n'):
+                                modified_content += '\n'
+                            
+                            # Add image as a proper paragraph without inline styles
+                            image_html = f'\n<p><img src="{final_image_url}" alt="{alt_text}"></p>\n'
+                            modified_content += image_html
+                            used_images.append(final_image_url)
+                            
+                            if self.wordpress_api:
+                                print(f"Added image from Media Library for keyword '{keyword}' (ID: {image['id']})")
+                            else:
+                                print(f"Added unique image for keyword '{keyword}' (ID: {image['id']})")
         
         # Final sanitization to ensure clean output
         final_content = self.content_sanitizer.clean_text_content(modified_content)
@@ -526,15 +612,33 @@ class PlaceholderImageAPI:
         return True
     
     def search_images(self, query: str, per_page: int = 10) -> List[dict]:
-        """Return placeholder image data"""
+        """Return placeholder image data with descriptive alt text"""
         images = []
-        for i in range(min(per_page, 3)):  # Limit to 3 images
+        # Generate more unique random seeds
+        base_seed = hash(query) % 10000
+        
+        # Create more descriptive alt text variations
+        alt_variations = [
+            f"Professional {query} image",
+            f"High-quality {query} photo",
+            f"Modern {query} illustration",
+            f"Creative {query} design",
+            f"Business {query} concept",
+            f"Abstract {query} background",
+            f"Minimalist {query} artwork",
+            f"Contemporary {query} visual"
+        ]
+        
+        for i in range(min(per_page, 10)):  # Allow up to 10 placeholder images
+            random_seed = base_seed + i * 137 + random.randint(1, 1000)  # More randomness
+            alt_text = alt_variations[i % len(alt_variations)]
+            
             images.append({
-                'id': f'placeholder_{i}_{hash(query) % 1000}',
-                'description': f'Placeholder image for {query}',
+                'id': f'placeholder_{random_seed}_{i}',
+                'description': alt_text,
                 'assets': {
                     'preview': {
-                        'url': f"{self.base_url}/800/400?random={hash(query) + i}"
+                        'url': f"{self.base_url}/800/400?random={random_seed}"
                     }
                 }
             })
@@ -551,7 +655,8 @@ class PlaceholderImageAPI:
 
 
 def create_image_processor(image_source: str, unsplash_key: str = None, 
-                          shutterstock_consumer_key: str = None, shutterstock_secret_key: str = None) -> ImageProcessor:
+                          shutterstock_consumer_key: str = None, shutterstock_secret_key: str = None,
+                          wordpress_api=None) -> ImageProcessor:
     """Factory function to create ImageProcessor with specified image source"""
     
     if image_source == "Unsplash":
@@ -559,7 +664,7 @@ def create_image_processor(image_source: str, unsplash_key: str = None,
             unsplash_api = UnsplashAPI(unsplash_key)
             if unsplash_api.authenticate():
                 print("Using Unsplash API for images")
-                return ImageProcessor(unsplash_api)
+                return ImageProcessor(unsplash_api, wordpress_api)
             else:
                 print("Unsplash authentication failed, falling back to placeholder images")
         else:
@@ -570,7 +675,7 @@ def create_image_processor(image_source: str, unsplash_key: str = None,
             shutterstock_api = ShutterstockAPI(shutterstock_consumer_key, shutterstock_secret_key)
             if shutterstock_api.authenticate():
                 print("Using Shutterstock API for images")
-                return ImageProcessor(shutterstock_api)
+                return ImageProcessor(shutterstock_api, wordpress_api)
             else:
                 print("Shutterstock authentication failed, falling back to placeholder images")
         else:
@@ -579,9 +684,9 @@ def create_image_processor(image_source: str, unsplash_key: str = None,
     elif image_source == "Placeholder":
         print("Using placeholder images")
         placeholder_api = PlaceholderImageAPI()
-        return ImageProcessor(placeholder_api)
+        return ImageProcessor(placeholder_api, wordpress_api)
     
     # Default fallback to placeholder images
     print("Using placeholder images as fallback")
     placeholder_api = PlaceholderImageAPI()
-    return ImageProcessor(placeholder_api)
+    return ImageProcessor(placeholder_api, wordpress_api)

@@ -199,9 +199,22 @@ class WordPressPublicator:
                                         values=["Unsplash", "Shutterstock", "Placeholder"], state='disabled', width=15)
         image_source_combo.grid(row=1, column=1, sticky=tk.W, pady=5)
         
+        # Checkbox para subir imágenes a WordPress Media Library
+        self.upload_to_media_var = tk.BooleanVar(value=True)
+        upload_media_cb = ttk.Checkbutton(self.images_config_frame, text="Upload images to WordPress Media Library", 
+                                        variable=self.upload_to_media_var, state='disabled')
+        upload_media_cb.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=5)
+        
+        # Etiqueta de ayuda para media upload
+        media_help = ttk.Label(self.images_config_frame, 
+                             text="When enabled, images are uploaded to your WordPress Media Library for better management", 
+                             font=('TkDefaultFont', 8), foreground='gray')
+        media_help.grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
+        
         # Guardar referencias para habilitar/deshabilitar
         self.words_spinbox = words_spinbox
         self.image_source_combo = image_source_combo
+        self.upload_media_cb = upload_media_cb
         
         # Contenido del post
         ttk.Label(parent, text="Contenido:").grid(row=start_row+8, column=0, sticky=(tk.W, tk.N), pady=5)
@@ -337,11 +350,15 @@ class WordPressPublicator:
                 # Create image processor based on selected source
                 try:
                     selected_source = self.image_source_var.get()
+                    # Only pass WordPress API if media upload is enabled
+                    wp_api_for_upload = self.wp_api if self.upload_to_media_var.get() else None
+                    
                     image_processor = create_image_processor(
                         image_source=selected_source,
                         unsplash_key=self.unsplash_access_key,
                         shutterstock_consumer_key=self.shutterstock_consumer_key,
-                        shutterstock_secret_key=self.shutterstock_secret_key
+                        shutterstock_secret_key=self.shutterstock_secret_key,
+                        wordpress_api=wp_api_for_upload  # Pass WordPress API only if media upload enabled
                     )
                     
                     words_per_image = int(self.words_per_image_var.get())
@@ -469,6 +486,7 @@ class WordPressPublicator:
         # Habilitar/deshabilitar controles de imagen
         self.words_spinbox.config(state=state)
         self.image_source_combo.config(state=state)
+        self.upload_media_cb.config(state=state)
 
 
 def main():

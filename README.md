@@ -124,12 +124,34 @@ When the "Add images to post content" option is enabled:
 - **Always Active**: Content sanitization runs on all posts, regardless of image settings
 
 ### Image Processing Features
-- **Smart Keyword Extraction**: Analyzes content for relevant terms
+- **Smart Keyword Extraction**: Analyzes content for relevant terms (up to 6 keywords)
+- **Random Image Selection**: Ensures all images are unique with no duplicates
 - **Automatic Image Placement**: Inserts images at optimal intervals
 - **Content-Aware Selection**: Chooses images matching article topics
 - **Paragraph-Aware Insertion**: Images are placed between paragraphs to maintain HTML structure
+- **Enhanced Variety**: Fetches 10 images per search and randomly selects from available options
+- **Duplicate Prevention**: Tracks used images and prevents repetition within the same post
+- **WordPress Media Library Integration**: Upload images directly to your WordPress Media Library
 - **Fallback Handling**: Continues without images if API fails
 - **Preview URLs**: Uses appropriate image sources based on API availability
+
+### WordPress Media Library Upload
+When enabled, images are uploaded directly to your WordPress Media Library instead of using external URLs:
+
+**Benefits:**
+- ✅ **Direct Management**: Images appear in your WordPress Media Library
+- ✅ **Reusable Assets**: Use uploaded images in future posts
+- ✅ **Editor Integration**: Images are available in the WordPress editor
+- ✅ **Better Performance**: Images are served from your WordPress site
+- ✅ **Backup Included**: Images are included in WordPress backups
+- ✅ **SEO Friendly**: Images use your domain for better SEO
+
+**How to Enable:**
+1. Enable "Add images to post content"
+2. Check "Upload to WordPress Media Library"
+3. Images will be automatically uploaded and embedded using WordPress URLs
+
+**Note:** This feature requires a valid WordPress connection and may take slightly longer due to upload processing.
 
 ## Requirements
 
